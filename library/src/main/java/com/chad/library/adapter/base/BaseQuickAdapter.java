@@ -217,7 +217,7 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
             recyclerView.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    if ((linearLayoutManager.findLastCompletelyVisibleItemPosition() + 1) != getItemCount()) {
+                    if (isFullScreen(linearLayoutManager)) {
                         setEnableLoadMore(true);
                     }
                 }
@@ -236,6 +236,11 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
                 }
             }, 50);
         }
+    }
+
+    private boolean isFullScreen(LinearLayoutManager llm) {
+        return (llm.findLastCompletelyVisibleItemPosition() + 1) != getItemCount() ||
+                llm.findFirstCompletelyVisibleItemPosition() != 0;
     }
 
     private int getTheBiggestNumber(int[] numbers) {
@@ -444,7 +449,14 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
         mDuration = duration;
     }
 
-
+    /**
+     * If you have added headeview, the notification view refreshes.
+     * Do not need to care about the number of headview, only need to pass in the position of the final view
+     * @param position
+     */
+    public final void refreshNotifyItemChanged(int position) {
+        notifyItemChanged(position + getHeaderLayoutCount());
+    }
     /**
      * Same as QuickAdapter#QuickAdapter(Context,int) but with
      * some initialization data.
@@ -607,7 +619,7 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
      */
     @Nullable
     public T getItem(@IntRange(from = 0) int position) {
-        if (position < mData.size())
+        if (position >= 0 && position < mData.size())
             return mData.get(position);
         else
             return null;
@@ -953,7 +965,7 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
             view.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    getOnItemClickListener().onItemClick(BaseQuickAdapter.this, v, baseViewHolder.getLayoutPosition() - getHeaderLayoutCount());
+                    setOnItemClick(v, baseViewHolder.getLayoutPosition() - getHeaderLayoutCount());
                 }
             });
         }
@@ -961,10 +973,31 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
             view.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View v) {
-                    return getOnItemLongClickListener().onItemLongClick(BaseQuickAdapter.this, v, baseViewHolder.getLayoutPosition() - getHeaderLayoutCount());
+                    return setOnItemLongClick(v, baseViewHolder.getLayoutPosition() - getHeaderLayoutCount());
                 }
             });
         }
+    }
+
+    /**
+     * override this method if you want to override click event logic
+     *
+     * @param v
+     * @param position
+     */
+    public void setOnItemClick(View v, int position) {
+        getOnItemClickListener().onItemClick(BaseQuickAdapter.this, v, position);
+    }
+
+    /**
+     * override this method if you want to override longClick event logic
+     *
+     * @param v
+     * @param position
+     * @return
+     */
+    public boolean setOnItemLongClick(View v, int position) {
+        return getOnItemLongClickListener().onItemLongClick(BaseQuickAdapter.this, v, position);
     }
 
     private MultiTypeDelegate<T> mMultiTypeDelegate;
@@ -1323,9 +1356,11 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
 
     /**
      * bind recyclerView {@link #bindToRecyclerView(RecyclerView)} before use!
-     *
+     * Recommend you to use {@link #setEmptyView(layoutResId,viewGroup)}
      * @see #bindToRecyclerView(RecyclerView)
+     *
      */
+    @Deprecated
     public void setEmptyView(int layoutResId) {
         checkNotNull();
         setEmptyView(layoutResId, getRecyclerView());
@@ -1537,6 +1572,12 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
     public void openLoadAnimation() {
         this.mOpenAnimationEnable = true;
     }
+    /**
+     * To close the animation when loading
+     */
+    public void closeLoadAnimation() {
+        this.mOpenAnimationEnable = false;
+    }
 
     /**
      * {@link #addAnimation(RecyclerView.ViewHolder)}
@@ -1593,7 +1634,7 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
 
     @SuppressWarnings("unchecked")
     private int recursiveExpand(int position, @NonNull List list) {
-        int count = 0;
+        int count = list.size();
         int pos = position + list.size() - 1;
         for (int i = list.size() - 1; i >= 0; i--, pos--) {
             if (list.get(i) instanceof IExpandable) {
@@ -1628,7 +1669,8 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
             return 0;
         }
         if (!hasSubItems(expandable)) {
-            expandable.setExpanded(false);
+            expandable.setExpanded(true);
+            notifyItemChanged(position);
             return 0;
         }
         int subItemCount = 0;
@@ -1638,7 +1680,7 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
             subItemCount += recursiveExpand(position + 1, list);
 
             expandable.setExpanded(true);
-            subItemCount += list.size();
+//            subItemCount += list.size();
         }
         int parentPos = position + getHeaderLayoutCount();
         if (shouldNotify) {
@@ -1682,7 +1724,13 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
         }
 
         IExpandable expandable = getExpandableItem(position);
-        if (expandable == null || !hasSubItems(expandable)) {
+        if (expandable == null) {
+            return 0;
+        }
+
+        if (!hasSubItems(expandable)) {
+            expandable.setExpanded(true);
+            notifyItemChanged(position);
             return 0;
         }
 
@@ -1737,6 +1785,8 @@ public abstract class BaseQuickAdapter<T, K extends BaseViewHolder> extends Recy
         int subItemCount = 0;
         if (expandable.isExpanded()) {
             List<T> subItems = expandable.getSubItems();
+            if (null == subItems) return 0;
+
             for (int i = subItems.size() - 1; i >= 0; i--) {
                 T subItem = subItems.get(i);
                 int pos = getItemPosition(subItem);
